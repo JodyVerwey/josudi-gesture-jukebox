@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Josudi Gesture Jukebox</title>
+    <style>
+      /* ---------------------------------------------------------------
+         Design tokens: every colour lives here, so changing the look
+         means editing one block instead of hunting through the file.
+      ---------------------------------------------------------------- */
+      :root {
+        --bg: #0e1014;
+        --panel: #171a21;
+        --panel-2: #1e222b;
+        --line: #2a2f3a;
+        --text: #e8eaf0;
+        --dim: #9aa3b2;
+        --accent: #57d9a3;
+        --accent-dim: #2f7f61;
+        --warn: #f0b429;
+        --danger: #ef5a5a;
+        --radius: 14px;
+        font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: var(--bg);
+        color: var(--text);
+        padding: 20px;
+      }
+
+      header {
+        display: flex;
+        align-items: baseline;
+        gap: 14px;
+        flex-wrap: wrap;
+        margin-bottom: 16px;
+      }
+      h1 { font-size: 22px; margin: 0; letter-spacing: -0.02em; }
+      /* Company name picked out in the accent colour */
+      .brand { color: var(--accent); font-weight: 800; }
+      .subtitle { color: var(--dim); font-size: 14px; }
+
+      /* Two columns: camera on the left, gesture list on the right.
+         On a narrow window they stack instead. */
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1.4fr) minmax(300px, 1fr);
+        gap: 18px;
+        align-items: start;
+      }
+      @media (max-width: 900px) {
+        .layout { grid-template-columns: 1fr; }
+      }
+
+      /* ---- Camera panel ---- */
+      .stage {
+        position: relative;
+        background: #000;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        overflow: hidden;
+        aspect-ratio: 4 / 3;
+      }
+      /* The <video> shows the raw camera. The <canvas> sits exactly on top and
+         is where we draw the hand skeleton. Both are mirrored (scaleX(-1)) so
+         it feels like a mirror — move your right hand, the right side moves. */
+      #video, #overlay {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        transform: scaleX(-1);
+      }
+      #video { object-fit: cover; }
+
+      /* One floating panel per hand, sitting along the bottom of the video.
+         Left hand on the left of the screen, right hand on the right — which
+         matches up because the picture is mirrored. */
+      .hands {
+        position: absolute;
+        left: 12px;
+        right: 12px;
+        bottom: 12px;
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        pointer-events: none; /* clicks pass through to the video underneath */
+      }
+      .hand-panel {
+        background: rgba(10, 12, 16, 0.74);
+        backdrop-filter: blur(6px);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 9px 12px;
+        min-width: 176px;
+        transition: opacity 140ms, border-color 140ms;
+      }
+      /* Dimmed when that hand isn't in shot, so the layout never jumps */
+      .hand-panel.idle { opacity: 0.32; }
+      .hand-panel.active { border-color: var(--accent-dim); }
+      .hand-panel.fired { border-color: var(--accent); }
+
+      .hand-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 10px;
+        margin-bottom: 5px;
+      }
+      .hand-tag {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.09em;
+        color: var(--dim);
+        font-weight: 700;
+      }
+      .hand-pattern {
+        font-family: ui-monospace, Consolas, monospace;
+        font-size: 11px;
+        color: var(--warn);
+      }
+      .hand-body { display: flex; align-items: center; gap: 10px; }
+      .hand-body .emoji { font-size: 30px; line-height: 1; }
+      .hand-body .gname { font-size: 14px; font-weight: 600; }
+
+      /* Five dots showing which fingers we think are extended, per hand.
+         Invaluable when a gesture isn't firing — you can see exactly why. */
+      .dots { display: flex; gap: 5px; margin-top: 7px; }
+      .finger { width: 25px; text-align: center; font-size: 9px; color: var(--dim); }
+      .finger .dot {
+        width: 9px;
+        height: 9px;
+        margin: 0 auto 3px;
+        border-radius: 50%;
+        background: #39404d;
+        transition: background 90ms linear;
+      }
+      .finger.up .dot { background: var(--accent); }
+
+      /* ---- Right-hand panel ---- */
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        padding: 14px;
+      }
+      .panel h2 {
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--dim);
+        margin: 0 0 10px;
+      }
+
+      .card {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 10px;
+        border: 1px solid transparent;
+        border-radius: 10px;
+        background: var(--panel-2);
+        margin-bottom: 8px;
+        transition: border-color 120ms, transform 120ms, background 120ms;
+      }
+      /* Flashes green the moment its gesture fires */
+      .card.fired {
+        border-color: var(--accent);
+        background: #1b2b25;
+        transform: translateX(3px);
+      }
+      .card .ico { font-size: 26px; width: 34px; text-align: center; }
+      .card .meta { flex: 1; min-width: 0; }
+      .card .name { font-size: 14px; font-weight: 600; }
+      .card .sound {
+        font-size: 12px;
+        color: var(--dim);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .card .sound.custom { color: var(--accent); }
+
+      button {
+        font: inherit;
+        font-size: 12px;
+        color: var(--text);
+        background: #2b313d;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 6px 10px;
+        cursor: pointer;
+      }
+      button:hover { background: #353c4a; }
+      button.primary {
+        background: var(--accent-dim);
+        border-color: var(--accent);
+        font-size: 14px;
+        padding: 10px 18px;
+      }
+      button.primary:hover { background: #389773; }
+
+      .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+      #status {
+        font-size: 13px;
+        padding: 10px 12px;
+        border-radius: 10px;
+        background: var(--panel-2);
+        border: 1px solid var(--line);
+        color: var(--dim);
+        margin-bottom: 14px;
+      }
+      #status.error { color: var(--danger); border-color: var(--danger); }
+      #status.ready { color: var(--accent); border-color: var(--accent-dim); }
+
+      code {
+        background: #0b0d11;
+        padding: 1px 5px;
+        border-radius: 5px;
+        font-size: 12px;
+        color: var(--warn);
+      }
+      .note { font-size: 12px; color: var(--dim); line-height: 1.5; margin: 10px 0 0; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>🎛️ <span class="brand">Josudi</span> Gesture Jukebox</h1>
+      <span class="subtitle">Make a hand shape at the camera → it plays a sound.</span>
+    </header>
+
+    <div id="status">Click <b>Start camera</b> to begin.</div>
+
+    <div class="row" style="margin-bottom: 14px">
+      <button id="startBtn" class="primary">▶ Start camera</button>
+      <button id="stopBtn" disabled>■ Stop</button>
+      <!-- If the panels label your hands the wrong way round, click this. -->
+      <button id="swapBtn" title="Swap which panel is left and which is right">⇄ Swap L/R</button>
+      <span class="subtitle" id="fps"></span>
+    </div>
+
+    <div class="layout">
+      <!-- LEFT: the camera view -->
+      <div class="stage">
+        <video id="video" playsinline muted></video>
+        <canvas id="overlay"></canvas>
+
+        <!-- One panel per hand — built by app.js -->
+        <div class="hands" id="handPanels"></div>
+      </div>
+
+      <!-- RIGHT: the gesture → sound bindings -->
+      <div class="panel">
+        <h2>Gestures</h2>
+        <div id="cards"><!-- filled in by app.js --></div>
+        <p class="note">
+          Each gesture plays a built-in synth tone until you give it a real file.
+          Click <b>Pick file</b> to choose one, or drop audio into the
+          <code>sounds</code> folder named after the gesture
+          (<code>fist.mp3</code>, <code>peace.wav</code>…) and refresh.
+        </p>
+      </div>
+    </div>
+
+    <!-- type="module" lets app.js use `import`, which MediaPipe needs. -->
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

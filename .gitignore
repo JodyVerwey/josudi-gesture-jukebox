@@ -1,0 +1,10 @@
+# Personal build notes — contains local machine paths, kept off the repo.
+BUILD-LOG.md
+
+# Your own audio files. Delete this line if you want to ship sounds with the app.
+sounds/*
+!sounds/.gitkeep
+
+node_modules/
+.DS_Store
+Thumbs.db
